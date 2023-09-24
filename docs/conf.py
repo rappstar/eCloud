@@ -4,6 +4,8 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+# pylint: disable=locally-disabled, line-too-long, invalid-name, redefined-builtin, missing-module-docstring
+
 # -- Path setup --------------------------------------------------------------
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -19,8 +21,8 @@ sys.path.insert(0, os.path.abspath('./../'))
 # -- Project information -----------------------------------------------------
 
 project = 'OpenCDA'
-copyright = '2021, UCLA Mobility Lab'
-author = 'R.S. Xu, X. Han, X. Hao'
+copyright = '2023, Georgia Tech EPL'
+author = 'J. Rapp, T. Landle, D. Blank, A. Drysdale'
 
 # The full version, including alpha/beta/rc tags
 release = '0.1'
@@ -36,7 +38,7 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.doctest',
     'sphinx.ext.intersphinx',
-    'sphinx.ext.todo',
+    'sphinx.ext.TODO',
     'sphinx.ext.coverage',
     'sphinx.ext.mathjax',
     'recommonmark',

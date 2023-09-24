@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"pylint.args": [
+			"--rcfile=${workspaceFolder}/.pylintrc",
+			"--init-hook",
+			"import sys; sys.path.insert(0, './ecloud')",
+		],
+		"[python]": {
+			"editor.defaultFormatter": "ms-python.black-formatter"
+		  }
+	}
+}

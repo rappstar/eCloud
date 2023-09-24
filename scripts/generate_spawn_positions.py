@@ -3,7 +3,7 @@ import random
 import os
 from agents.navigation.global_route_planner import GlobalRoutePlanner
 from jinja2 import FileSystemLoader, Environment
-from opencda.scenario_testing.utils.yaml_utils import load_yaml
+from ecloud.scenario_testing.utils.yaml_utils import load_yaml
 
 # Add a seed value for random number generation
 random.seed(42)
@@ -75,7 +75,7 @@ def choose_template():
     choice = int(input("Choose a template by number: "))
     return templates[choice - 1]
 
-cloud_config = load_yaml("cloud_config.yaml")
+cloud_config = load_yaml("environment_config.yaml")
 CARLA_IP = cloud_config["carla_server_public_ip"]    
 
 client = carla.Client(CARLA_IP, 2000)
