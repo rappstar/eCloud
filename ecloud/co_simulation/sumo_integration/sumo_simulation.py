@@ -427,7 +427,7 @@ class SumoSimulation:
         try:
             traci.vehicle.add(actor_id, 'carla_route', typeID=type_id)
         except traci.exceptions.TraCIException as error:
-            logger.error('Spawn sumo actor failed: %s', error)
+            logger.exception('Spawn sumo actor failed: %s', error)
             return INVALID_ACTOR_ID
 
         if color is not None:

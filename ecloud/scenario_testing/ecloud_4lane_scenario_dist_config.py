@@ -177,7 +177,7 @@ def run_scenario(opt, config_yaml):
                 try:
                     veh.destroy()
                 except RuntimeError as destroy_error:
-                    logger.error('%s: failed to destroy single CAV', type(destroy_error))
+                    logger.warning('%s: failed to destroy single CAV', type(destroy_error))
 
         for veh in bg_veh_list:
             try:

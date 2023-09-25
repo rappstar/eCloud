@@ -180,7 +180,7 @@ class EcloudAPIToServerComms:
                     vehicle_manager_proxy.vehicle.set_velocity(vec)
                     vehicle_manager_proxy.vehicle.set_transform(tfm)
         except RuntimeError as r_e:
-            logger.error('failed to properly unpack updates - %s \n\t %s', r_e, vehicle_update)
+            logger.exception('failed to properly unpack updates - %s \n\t %s', r_e, vehicle_update)
             if EcloudConfig.fatal_errors:
                 raise
 

@@ -235,21 +235,27 @@ class ScenarioManager:
             np.random.seed(simulation_config['seed'])
             random.seed(simulation_config['seed'])
 
-        self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])
-        self.client.set_timeout(EcloudCommsConsts.TIMEOUT_S)
-
-        if xodr_path:
-            self.world = load_customized_world(xodr_path, self.client)
-
-        elif town:
-            try:
-                self.world = self.client.load_world(town)
-
-            except RuntimeError as err:
-                logger.critical("%s - %s not found in CARLA repo - download all town maps.", err, town)
+        try:
+            self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])    
+            self.client.set_timeout(EcloudCommsConsts.TIMEOUT_S)
+        
+        except RuntimeError as err:
+            logger.exception("%s - failed to connect to Carla", err)
+            return
 
         else:
-            self.world = self.client.get_world()
+            if xodr_path:
+                self.world = load_customized_world(xodr_path, self.client)
+
+            elif town:
+                try:
+                    self.world = self.client.load_world(town)
+
+                except RuntimeError as err:
+                    logger.exception("error - %s - while trying to load town %s", err, town)
+
+            else:
+                self.world = self.client.get_world()
 
         if not self.world:
             logger.critical("world loading failed")
@@ -695,7 +701,7 @@ class ScenarioManager:
                 try:
                     spectator.destroy()
                 except RuntimeError as err:
-                    logger.error("failed to destroy single CAV - %s", err)
+                    logger.warning("failed to destroy single CAV - %s", err)
 
             subprocess.Popen(['pkill','-9','CarlaUE4'])
             sys.exit(0)
