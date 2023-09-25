@@ -228,7 +228,7 @@ class EvaluationManager:
         try:
             picklefile = open(data_df_path, 'rb+')
             current_data_df = pickle.load(picklefile)  #unpickle the dataframe
-        except Exception as pickle_error:
+        except FileNotFoundError as pickle_error:
             logger.warning('%s: failed to find pickle file - creating', type(pickle_error))
             picklefile = open(data_df_path, 'wb+')
             current_data_df = pd.DataFrame(columns=['num_cars', f'{column_key}_ms', 'run_timestamp'])
@@ -244,8 +244,7 @@ class EvaluationManager:
         '''
         evaluate the data on the 12 individual agent steps
         '''
-        PLANER_AGENT_STEPS = 12 # TODO: global
-        all_agent_data_lists = [[] for _ in range(PLANER_AGENT_STEPS)]
+        all_agent_data_lists = [[] for _ in range(Consts.PLANER_AGENT_STEPS)]
         for _, v_m in self.scenario_manager.vehicle_managers.items():
             agent_data_list = v_m.agent.debug_helper.get_agent_step_list()
             for idx, sub_list in enumerate(agent_data_list):
@@ -420,7 +419,7 @@ class EvaluationManager:
         try:
             picklefile = open(sim_time_df_path, 'rb+')
             sim_time_df = pickle.load(picklefile)
-        except Exception as pickle_error:
+        except FileNotFoundError as pickle_error:
             logger.warning('%s: failed to find pickle file - creating', type(pickle_error))
             picklefile = open(sim_time_df_path, 'wb+')
             sim_time_df = pd.DataFrame(columns=['num_cars', 'time_s', 'startup_time_ms', 'shutdown_time_ms', 'run_timestamp'])

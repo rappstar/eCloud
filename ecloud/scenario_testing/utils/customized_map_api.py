@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
-"""Loading world from customized map
+"""
+Loading world from customized map
 """
 # Author: Xu Han <hanxu417@ucla.edu>, Runsheng Xu <rxx3386@ucla.edu>
 # License: TDG-Attribution-NonCommercial-NoDistrib
@@ -42,7 +43,7 @@ def load_customized_world(xodr_path, client):
             except OSError:
                 print('file could not be readed.')
                 sys.exit(1)
-        print('load opendrive map %r.' % os.path.basename(xodr_path))
+        print(f'load opendrive map {os.path.basename(xodr_path)}')
         vertex_distance = 2.0  # in meters
         max_road_length = 500.0  # in meters
         wall_height = 1.0  # in meters

@@ -29,11 +29,9 @@ from ecloud.core.common.data_dumper import DataDumper
 from ecloud.core.common.misc import compute_distance
 from ecloud.client_debug_helper import ClientDebugHelper
 from ecloud.core.common.ecloud_config import LocationType
+import ecloud.globals as ecloud_globals
 
-logger = logging.getLogger("ecloud")
-
-MIN_DESTINATION_DISTANCE_M = 500 # TODO: config?
-COLLISION_ERROR = "Spawn failed because of collision at spawn position"
+logger = logging.getLogger(ecloud_globals.Consts.ECLOUD)
 
 class VehicleManager:
     """
@@ -207,7 +205,7 @@ class VehicleManager:
 
                 if location_type == LocationType.RANDOM:
                     dist = 0
-                    min_dist = MIN_DESTINATION_DISTANCE_M
+                    min_dist = ecloud_globals.Consts.MIN_DESTINATION_DISTANCE_M
                     count = 0
                     while dist < min_dist:
                         destination_transform = spawn_points[random.randint(0, len(spawn_points) - 1)]
@@ -232,7 +230,7 @@ class VehicleManager:
                 spawned = True
 
             except Exception as spawn_error: # pylint: disable=broad-exception-caught
-                if COLLISION_ERROR not in f'{spawn_error}':
+                if ecloud_globals.Consts.COLLISION_ERROR not in f'{spawn_error}':
                     logger.error("exception during spawn: %s - %s", type(spawn_error), spawn_error)
 
                 continue

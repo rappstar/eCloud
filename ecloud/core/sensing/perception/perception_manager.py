@@ -494,8 +494,8 @@ class PerceptionManager:
                     yolo_detection, rgb_image, i)
                 rgb_image = cv2.resize(rgb_image, (0, 0), fx=0.4, fy=0.4)
                 cv2.imshow(
-                    '%s camera of actor %d, perception activated' %
-                    (names[i], self.vehicle.id), rgb_image)
+                    f'{names[i]} camera of actor {self.vehicle.id}, perception activated',
+                    rgb_image)
             cv2.waitKey(1)
 
         if self.lidar_visualize:
@@ -575,8 +575,8 @@ class PerceptionManager:
 
             # show image using cv2
             cv2.imshow(
-                'front camera of actor %d, perception deactivated' %
-                self.vehicle.id, rgb_image)
+                f'front camera of actor {self.vehicle.id}, perception deactivated',
+                rgb_image)
             cv2.waitKey(1)
 
         if self.lidar_visualize:

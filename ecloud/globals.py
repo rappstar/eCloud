@@ -51,6 +51,12 @@ class Consts:
     CLIENT_IP = 'vehicle_client_public_ip'
     CLIENT_DNS = 'vehicle_client_dns'
 
+    # random spawning vars
+    MIN_DESTINATION_DISTANCE_M = 500
+    COLLISION_ERROR = "Spawn failed because of collision at spawn position"
+
+    PLANER_AGENT_STEPS = 12
+
 class EnvironmentConfig():
     '''
     static class containing accessor methods for the environment_config.yaml
