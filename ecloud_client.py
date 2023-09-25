@@ -9,11 +9,9 @@ import argparse
 import sys
 import json
 import asyncio
-import os
 import logging
 
 import carla
-import grpc
 from google.protobuf.timestamp_pb2 import Timestamp # pylint: disable=no-name-in-module
 
 import ecloud.globals as ecloud_globals
@@ -22,90 +20,17 @@ from ecloud.core.common.cav_world import CavWorld
 from ecloud.core.common.vehicle_manager import VehicleManager
 from ecloud.core.plan.local_planner_behavior import RoadOption
 from ecloud.core.plan.global_route_planner_dao import GlobalRoutePlannerDAO
-from ecloud.scenario_testing.utils.yaml_utils import load_yaml
-from ecloud.core.common.ecloud_config import EcloudConfig, eDoneBehavior
-from ecloud.ecloud_server.ecloud_comms import EcloudComms, ecloud_run_push_server #, EcloudClient
+from ecloud.core.common.ecloud_config import EcloudConfig, DoneBehavior
+from ecloud.ecloud_server.ecloud_comms import EcloudClientToServerComms, ecloud_run_push_server
 from ecloud.core.application.edge.transform_utils import deserialize_waypoint
 
 import ecloud_pb2 as ecloud
-import ecloud_pb2_grpc as ecloud_rpc
 
-logger = logging.getLogger("ecloud")
+logger = logging.getLogger(ecloud_globals.Consts.ECLOUD)
 
-environment_config = load_yaml("environment_config.yaml") # TODO: move to eCloudConfig
-
-ECLOUD_PUSH_BASE_PORT = ecloud_globals.__push_base_port__
-LOCAL = ecloud_globals.__local__
-AZURE = ecloud_globals.__azure__
-
-#TODO: move to eCloudClient
-def serialize_debug_info(vehicle_update, vehicle_manager) -> None:
-    '''
-    serialize the debug data from the vehicle manager into a protobuf
-    '''
-    planer_debug_helper = vehicle_manager.agent.debug_helper
-    planer_debug_helper_msg = ecloud.PlanerDebugHelper()
-    planer_debug_helper.serialize_debug_info(planer_debug_helper_msg)
-    vehicle_update.planer_debug_helper.CopyFrom( planer_debug_helper_msg )
-
-    loc_debug_helper = vehicle_manager.localizer.debug_helper
-    loc_debug_helper_msg = ecloud.LocDebugHelper()
-    loc_debug_helper.serialize_debug_info(loc_debug_helper_msg)
-    vehicle_update.loc_debug_helper.CopyFrom( loc_debug_helper_msg )
-
-    client_debug_helper = vehicle_manager.debug_helper
-    client_debug_helper_msg = ecloud.ClientDebugHelper()
-    client_debug_helper.serialize_debug_info(client_debug_helper_msg)
-    vehicle_update.client_debug_helper.CopyFrom(client_debug_helper_msg)
-
-#TODO: move to eCloudClient
-async def send_registration_to_ecloud_server(stub_, port) -> ecloud.SimulationInfo:
-    '''
-    register this container client with the eCloud server
-    '''
-    request = ecloud.RegistrationInfo()
-    request.vehicle_state = ecloud.VehicleState.REGISTERING
-    request.vehicle_port = port
-    try:
-        request.container_name = os.environ["HOSTNAME"]
-    except KeyError:
-        request.container_name = f"ecloud_client_{port}.py"
-
-    request.vehicle_ip = EcloudConfig.vehicle_ip
-
-    sim_info = await stub_.Client_RegisterVehicle(request)
-
-    logger.info("vehicle ID %s received...", sim_info.vehicle_index)
-
-    return sim_info
-
-#TODO: move to eCloudClient
-async def send_carla_data_to_ecloud(stub_, vehicle_index, actor_id, vid) -> ecloud.SimulationInfo:
-    '''
-    send Carla actor data to eCloud server
-    '''
-    message = {"vehicle_index": vehicle_index, "actor_id": actor_id, "vid": vid}
-    logger.info("sending Carla rpc %s", message)
-
-    # send actor ID and vid to API
-    update = ecloud.RegistrationInfo()
-    update.vehicle_state = ecloud.VehicleState.CARLA_UPDATE
-    update.vehicle_index = vehicle_index
-    update.vid = vid
-    update.actor_id = actor_id
-
-    sim_info = await stub_.Client_RegisterVehicle(update)
-
-    return sim_info
-
-#TODO: move to eCloudClient
-async def send_vehicle_update(stub_, vehicle_update_) -> ecloud.Empty:
-    '''
-    push a vehicle update message to eCloud server
-    '''
-    empty = await stub_.Client_SendUpdate(vehicle_update_)
-
-    return empty
+ECLOUD_PUSH_BASE_PORT = ecloud_globals.Consts.PUSH_BASE_PORT
+LOCAL = ecloud_globals.Consts.LOCAL
+AZURE = ecloud_globals.Consts.AZURE
 
 def arg_parse():
     '''
@@ -118,8 +43,8 @@ def arg_parse():
                              'Set it to true only when you have installed the pytorch/sklearn package.')
     parser.add_argument('-i', "--ipaddress", type=str, default='localhost',
                         help="Specifies the ip address of the server to connect to. [Default: localhost]")
-    parser.add_argument('-p', "--port", type=int, default=ecloud_globals.__server_port__,
-                        help=f"Specifies the port to connect to. [Default: {ecloud_globals.__server_port__}]")
+    parser.add_argument('-p', "--port", type=int, default=ecloud_globals.Consts.SERVER_PORT,
+                        help=f"Specifies the port to connect to. [Default: {ecloud_globals.Consts.SERVER_PORT}]")
     parser.add_argument('-e', "--environment", type=str, default="local",
                             help="Environment to run in: 'local' or 'azure'. [Default: 'local']")
     parser.add_argument('-m', "--machine", type=str, default="localhost",
@@ -162,14 +87,9 @@ async def main():
 
     logger.info("push server spun up on port %s", port)
 
-    # TODO: move to eCloudClient
-    channel = grpc.aio.insecure_channel(
-        target=f"{EcloudConfig.ecloud_ip}:{opt.port}",
-        options=EcloudComms.GRPC_OPTIONS,
-        )
-
-    ecloud_server = ecloud_rpc.EcloudStub(channel)
-    ecloud_update = await send_registration_to_ecloud_server(ecloud_server, port)
+    ecloud_client = EcloudClientToServerComms(ip_ad=EcloudConfig.ecloud_ip,
+                                              port=opt.port)
+    ecloud_update = await ecloud_client.send_registration_to_ecloud_server(port)
     vehicle_index = ecloud_update.vehicle_index
     assert vehicle_index is not None
 
@@ -218,7 +138,7 @@ async def main():
     actor_id = vehicle_manager.vehicle.id
     vid = vehicle_manager.vid
 
-    await send_carla_data_to_ecloud(ecloud_server, vehicle_index, actor_id, vid)
+    await ecloud_client.send_carla_data_to_ecloud(vehicle_index, actor_id, vid)
 
     assert push_q.empty() # currently only process only a single message at a time
     pong = await push_q.get()
@@ -241,7 +161,7 @@ async def main():
         # HANDLE DEBUG DATA REQUEST
         if pong.command == ecloud.Command.REQUEST_DEBUG_INFO:
             vehicle_update.vehicle_state = ecloud.VehicleState.DEBUG_INFO_UPDATE
-            serialize_debug_info(vehicle_update, vehicle_manager)
+            ecloud_client.serialize_debug_info(vehicle_update, vehicle_manager)
 
         # HANDLE TICK
         elif pong.command == ecloud.Command.TICK:
@@ -269,22 +189,22 @@ async def main():
                                      swp.transform.rotation.roll,
                                      swp.transform.rotation.pitch,
                                      swp.transform.rotation.yaw)
-                        wp = deserialize_waypoint(swp, dao)
+                        wpt = deserialize_waypoint(swp, dao)
                         logger.debug("DAO Waypoint x: %s, y: %s, z: %s, rl: %s, pt: %s, yw: %s",
-                                     wp.transform.location.x,
-                                     wp.transform.location.y,
-                                     wp.transform.location.z,
-                                     wp.transform.rotation.roll,
-                                     wp.transform.rotation.pitch,
-                                     wp.transform.rotation.yaw)
-                        is_wp_valid = vehicle_manager.agent.get_local_planner().is_waypoint_valid(waypoint=wp)
+                                     wpt.transform.location.x,
+                                     wpt.transform.location.y,
+                                     wpt.transform.location.z,
+                                     wpt.transform.rotation.roll,
+                                     wpt.transform.rotation.pitch,
+                                     wpt.transform.rotation.yaw)
+                        is_wp_valid = vehicle_manager.agent.get_local_planner().is_waypoint_valid(waypoint=wpt)
 
                         if edge_sets_destination and is_wp_valid:
                             cur_location = vehicle_manager.vehicle.get_location()
                             start_location = carla.Location(x=cur_location.x, y=cur_location.y, z=cur_location.z)
-                            end_location = carla.Location(x=wp.transform.location.x,
-                                                          y=wp.transform.location.y,
-                                                          z=wp.transform.location.z)
+                            end_location = carla.Location(x=wpt.transform.location.x,
+                                                          y=wpt.transform.location.y,
+                                                          z=wpt.transform.location.z)
                             clean = True # bool(destination["clean"])
                             end_reset = True # bool(destination["reset"])
                             vehicle_manager.set_destination(start_location, end_location, clean, end_reset)
@@ -299,7 +219,7 @@ async def main():
                                 # " : ", waypoints[0].transform)
                                 waypoint_buffer.clear() #EDIT MADE
                                 has_not_cleared_buffer = False
-                            waypoint_buffer.append((wp, RoadOption.STRAIGHT))
+                            waypoint_buffer.append((wpt, RoadOption.STRAIGHT))
 
                     waypoint_proto = None
 
@@ -334,9 +254,9 @@ async def main():
                 if control is None or vehicle_manager.is_close_to_scenario_destination():
                     vehicle_update.vehicle_state = ecloud.VehicleState.TICK_DONE
                     if not reported_done:
-                        serialize_debug_info(vehicle_update, vehicle_manager)
+                        ecloud_client.serialize_debug_info(vehicle_update, vehicle_manager)
 
-                    if control is not None and done_behavior == eDoneBehavior.CONTROL:
+                    if control is not None and done_behavior == DoneBehavior.CONTROL:
                         vehicle_manager.apply_control(control)
 
                 else:
@@ -355,27 +275,27 @@ async def main():
 
                 if is_edge or vehicle_index == EcloudConfig.SPECTATOR_INDEX:
                     velocity = vehicle_manager.vehicle.get_velocity()
-                    pv = ecloud.Velocity()
-                    pv.x = velocity.x
-                    pv.y = velocity.y
-                    pv.z = velocity.z
-                    vehicle_update.velocity.CopyFrom(pv)
+                    prv = ecloud.Velocity()
+                    prv.x = velocity.x
+                    prv.y = velocity.y
+                    prv.z = velocity.z
+                    vehicle_update.velocity.CopyFrom(prv)
 
                     transform = vehicle_manager.vehicle.get_transform()
-                    pt = ecloud.Transform()
-                    pt.location.x = transform.location.x
-                    pt.location.y = transform.location.y
-                    pt.location.z = transform.location.z
-                    pt.rotation.roll = transform.rotation.roll
-                    pt.rotation.yaw = transform.rotation.yaw
-                    pt.rotation.pitch = transform.rotation.pitch
-                    vehicle_update.transform.CopyFrom(pt)
+                    prt = ecloud.Transform()
+                    prt.location.x = transform.location.x
+                    prt.location.y = transform.location.y
+                    prt.location.z = transform.location.z
+                    prt.rotation.roll = transform.rotation.roll
+                    prt.rotation.yaw = transform.rotation.yaw
+                    prt.rotation.pitch = transform.rotation.pitch
+                    vehicle_update.transform.CopyFrom(prt)
 
             else:
                 vehicle_update.vehicle_state = ecloud.VehicleState.ERROR # TODO: handle error status
                 logger.error("ecloud_client error")
 
-        if not reported_done or done_behavior == eDoneBehavior.CONTROL:
+        if not reported_done or done_behavior == DoneBehavior.CONTROL:
             if not reported_done:
                 vehicle_update.tick_id = tick_id
                 vehicle_update.vehicle_index = vehicle_index
@@ -383,7 +303,7 @@ async def main():
                              vehicle_index,
                              tick_id,
                              vehicle_update)
-                ecloud_update = await send_vehicle_update(ecloud_server, vehicle_update)
+                ecloud_update = await ecloud_client.send_vehicle_update(vehicle_update)
 
             if vehicle_update.vehicle_state == ecloud.VehicleState.TICK_DONE or \
                     vehicle_update.vehicle_state == ecloud.VehicleState.DEBUG_INFO_UPDATE:
@@ -403,7 +323,7 @@ async def main():
             if pong.command == ecloud.Command.PULL_WAYPOINTS_AND_TICK:
                 wp_request = ecloud.WaypointRequest()
                 wp_request.vehicle_index = vehicle_index
-                waypoint_proto = await ecloud_server.Client_GetWaypoints(wp_request)
+                waypoint_proto = await ecloud_client.stub.Client_GetWaypoints(wp_request)
                 pong.command = ecloud.Command.TICK
 
             # HANDLE END
@@ -429,7 +349,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         logger.info("caught keyboard interrupt")
 
-    except Exception as e:
-        logger.exception("exception hit: %s - %s", type(e), e)
+    except Exception as err: # pylint: disable=broad-exception-caught
+        logger.exception("exception hit: %s - %s", type(err), err)
         if EcloudConfig.fatal_errors:
             raise

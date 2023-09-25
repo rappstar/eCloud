@@ -7,36 +7,49 @@ global variables & constants: contains commonly referenced strings & integers
 
 from ecloud.scenario_testing.utils.yaml_utils import load_yaml
 
-# TODO: make a Consts class
-# TODO: make a Globals class (mutable)
-
 __version__ = "0.0.3" # 3: CPP server
-__ecloud__ = "ecloud"
 
 # CONSTS
-__local__ = "local"
-__localhost__ = "localhost"
-__azure__ = "azure"
-__carla_version__ = "0.9.12"
-__default_scenario__ = "ecloud_4lane_scenario_dist_config"
-__spectator_index__ = 0
+class Consts:
+    '''
+    package constants
+    '''
 
-# gRPC
-__ecloud_server_path__ = "./ecloud/ecloud_server/ecloud_server"
-__server_port__ = 50051 # gRPC server listens
-__push_api_port__ = 50061 # sim orchestrator listens
-__push_base_port__ = 50101 # client N listens on base + N
+    ECLOUD = "ecloud"
+    LOCAL = "local"
+    LOCALHOST = "localhost"
+    AZURE = "azure"
+    CARLA_VERSION = "0.9.12"
+    DEFAULT_SCENARIO = "ecloud_4lane_scenario_dist_config"
+    SPECTATOR_INDEX = 0
 
-# FILE PATHS
-__environment_config__ = "environment_config.yaml" # in eCloud root folder
-# local Carla path
-# eCloud gRPC server path
-# evaluation outputs path(s)
+    # gRPC
+    ECLOUD_SERVER_PATH = "./ecloud/ecloud_server/ecloud_server"
+    SERVER_PORT = 50051 # gRPC server listens
+    PUSH_API_PORT = 50061 # sim orchestrator listens
+    PUSH_BASE_PORT = 50101 # client N listens on base + N
 
-# EDGE
-__world_dt__ = 0.03 # sec
-__edge_dt__ = 0.20 # sec
-__edge_search_t__ = 2.00 # sec
+    # FILE PATHS
+    ENVIRONMENT_CONFIG = "environment_config.yaml" # in eCloud root folder
+    # local Carla path
+    # eCloud gRPC server path
+    # evaluation outputs path(s)
+
+    # EDGE
+    WORLD_DT = 0.03 # sec
+    EDGE_DT = 0.20 # sec
+    EDGE_SEARCH_DT = 2.00 # sec
+
+    # YAML dict keys: server IPs
+    CARLA_IP = 'carla_server_public_ip'
+    ECLOUD_IP = 'ecloud_server_public_ip'
+
+    # YAML dict keys: clients
+    CLIENTS = 'clients'
+    CLIENT_MACHINE = 'client_machine'
+    MACHINE_NAME = 'machine_name' # self-identifier in ecloud_client to fetch environment vars
+    CLIENT_IP = 'vehicle_client_public_ip'
+    CLIENT_DNS = 'vehicle_client_dns'
 
 class EnvironmentConfig():
     '''
@@ -51,19 +64,8 @@ class EnvironmentConfig():
             vehicle_client_dns: ''
     '''
 
-    # keys: server IPs
-    CARLA_IP = 'carla_server_public_ip'
-    ECLOUD_IP = 'ecloud_server_public_ip'
-
-    # keys: clients
-    CLIENTS = 'clients'
-    CLIENT_MACHINE = 'client_machine'
-    MACHINE_NAME = 'machine_name' # self-identifier in ecloud_client to fetch environment vars
-    CLIENT_IP = 'vehicle_client_public_ip'
-    CLIENT_DNS = 'vehicle_client_dns'
-
-    config = load_yaml(__environment_config__)
-    environment = __local__
+    config = load_yaml(Consts.ENVIRONMENT_CONFIG)
+    environment = Consts.LOCAL
 
     @staticmethod
     def set_environment(environment: str) -> None:
@@ -85,22 +87,22 @@ class EnvironmentConfig():
         '''
         gets the IP of the Carla server
         '''
-        return EnvironmentConfig.config[EnvironmentConfig.environment][EnvironmentConfig.CARLA_IP]
+        return EnvironmentConfig.config[EnvironmentConfig.environment][Consts.CARLA_IP]
 
     @staticmethod
     def get_ecloud_ip() -> str:
         '''
         gets the IP of gRPC eCloud server
         '''
-        return EnvironmentConfig.config[EnvironmentConfig.environment][EnvironmentConfig.ECLOUD_IP]
+        return EnvironmentConfig.config[EnvironmentConfig.environment][Consts.ECLOUD_IP]
 
     @staticmethod
     def get_client_ip_by_name(client_name) -> str:
         '''
         gets the parameters for a given client name - e.g. 'ndm' - so that the client can access its IP config
         '''
-        for client_dict in EnvironmentConfig.config[EnvironmentConfig.environment][EnvironmentConfig.CLIENTS].values():
-            if client_dict[EnvironmentConfig.MACHINE_NAME] == client_name:
-                return client_dict[EnvironmentConfig.CLIENT_IP]
+        for client_dict in EnvironmentConfig.config[EnvironmentConfig.environment][Consts.CLIENTS].values():
+            if client_dict[Consts.MACHINE_NAME] == client_name:
+                return client_dict[Consts.CLIENT_IP]
 
         assert False, f'invalid client name: {client_name}'

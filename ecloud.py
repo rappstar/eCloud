@@ -14,10 +14,10 @@ import subprocess
 import logging
 import re
 
-from ecloud.globals import __version__, __ecloud__, __default_scenario__, EnvironmentConfig
+from ecloud.globals import __version__, EnvironmentConfig
 import ecloud.globals as ecloud_globals
 
-logger = logging.getLogger(__ecloud__)
+logger = logging.getLogger(ecloud_globals.Consts.ECLOUD)
 
 import_module = re.compile(r'import ([\.A-Za-z0-9_-]+) ')
 import_class = re.compile(r'from ([\.A-Za-z0-9_-]+) import')
@@ -27,12 +27,12 @@ def arg_parse():
     fetch the command line args & returns an args object
     '''
     parser = argparse.ArgumentParser(description="eCloudSim scenario runner.")
-    parser.add_argument('-t', "--test_scenario", type=str, default=__default_scenario__,
+    parser.add_argument('-t', "--test_scenario", type=str, default=ecloud_globals.Consts.DEFAULT_SCENARIO,
                         help='Define the name of the scenario you want to test. The given name must'
                              'match one of the testing scripts(e.g. single_2lanefree_carla) in '
                              'ecloud/scenario_testing/ folder'
                              ' as well as the corresponding yaml file in ecloud/scenario_testing/config_yaml.'
-                             f'[Default: {__default_scenario__}]')
+                             f'[Default: {ecloud_globals.Consts.DEFAULT_SCENARIO}]')
 
     # CONFIGURATION ARGS
     parser.add_argument('-n', "--num_cars", type=int, default=0,
@@ -45,8 +45,8 @@ def arg_parse():
                             help="Rebuild gRPC proto files")
     parser.add_argument('-s', "--steps", type=int, default=0,
                             help="Number of scenario ticks to execute before exiting; if set, overrides scenario config")
-    parser.add_argument('-e', "--environment", type=str, default=ecloud_globals.__local__,
-                            help=f"Environment to run in: 'local' or 'azure'. [Default: '{ecloud_globals.__local__}']")
+    parser.add_argument('-e', "--environment", type=str, default=ecloud_globals.Consts.LOCAL,
+                            help=f"Environment to run in: 'local' or 'azure'. [Default: '{ecloud_globals.Consts.LOCAL}']")
     parser.add_argument('-r', "--run_carla", type=str, nargs='?', default=False, const=" ",
                             help="Run Carla with optional args; use = --run_carla='-RenderOffscreen'")
     parser.add_argument('-f', "--fatal_errors", action='store_true',
@@ -74,35 +74,35 @@ def check_imports():
     debug helper function to scan for missing imports
     '''
     missing_imports = {}
-    for (root,_,files) in os.walk(__ecloud__, topdown=True):
+    for (root,_,files) in os.walk(ecloud_globals.Consts.ECLOUD, topdown=True):
         for file in files:
             if file.endswith('.py'):
                 # print(f"{file}")
-                with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
-                    s = f.read()
-                    for l in s.splitlines():
-                        x = re.search(import_module, l)
-                        if x:
-                            module = x.group(1)
+                with open(os.path.join(root, file), 'r', encoding='utf-8') as handle:
+                    lines = handle.read()
+                    for line in lines.splitlines():
+                        rex = re.search(import_module, line)
+                        if rex:
+                            module = rex.group(1)
                             try:
                                 importlib.import_module(module)
-                            except Exception as me:
-                                if module not in missing_imports and f"{me}" not in missing_imports.values():
-                                    missing_imports[module] = f"{me}"
-                                    logger.error("failed importing %s - %s", module, me)
+                            except ModuleNotFoundError as module_error:
+                                if module not in missing_imports and f"{module_error}" not in missing_imports.values():
+                                    missing_imports[module] = f"{module_error}"
+                                    logger.error("failed importing %s - %s", module, module_error)
                                 continue
                             else:
                                 logger.debug("module %s imported OK", module)
 
-                        x = re.search(import_class, l)
-                        if x:
+                        rex = re.search(import_class, line)
+                        if rex:
                             try:
-                                module = x.group(1)
+                                module = rex.group(1)
                                 importlib.import_module(module)
-                            except Exception as ce:
-                                if module not in missing_imports and f"{ce}" not in missing_imports.values():
-                                    missing_imports[module] = f"{ce}"
-                                    logger.error("failed importing %s - %s", module, ce)
+                            except ModuleNotFoundError as class_error:
+                                if module not in missing_imports and f"{class_error}" not in missing_imports.values():
+                                    missing_imports[module] = f"{class_error}"
+                                    logger.error("failed importing %s - %s", module, class_error)
                                 continue
                             else:
                                 logger.debug("module %s imported OK", module)
@@ -158,22 +158,17 @@ def main():
 
     EnvironmentConfig.set_environment(opt.environment)
     scenario_runner = getattr(testing_scenario, 'run_scenario')
-    scenario_runner(opt, config_yaml)
-
-
-if __name__ == '__main__':
     try:
-        main()
+        scenario_runner(opt, config_yaml)
 
     except KeyboardInterrupt:
         logger.info('exited by user.')
         sys.exit(0)
 
-    except SystemExit:
-        logger.info('scenario complete - exiting.')
-        sys.exit(0)
-
-    except Exception as e:
-        logger.exception("exception hit: %s - %s", type(e), e)
+    except Exception as err: # pylint: disable=broad-exception-caught
+        logger.exception("exception hit: %s - %s", type(err), err)
         raise
+
+if __name__ == '__main__':
+    main()
     

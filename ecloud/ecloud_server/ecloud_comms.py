@@ -9,6 +9,7 @@ import logging
 import json
 import asyncio
 import time
+import os
 
 import grpc
 import carla
@@ -23,7 +24,7 @@ import ecloud_pb2_grpc as ecloud_rpc
 logger = logging.getLogger("ecloud")
 
 NSEC_TO_MSEC = 1/1000000
-class EcloudComms:
+class EcloudCommsConsts:
     '''
     static class containing comms definitions
     '''
@@ -48,7 +49,7 @@ class EcloudComms:
                     ("grpc.keepalive_timeout_ms", TIMEOUT_MS),
                     ("grpc.service_config", RETRY_OPTS)]
 
-class EcloudServerComms:
+class EcloudAPIToServerComms:
     '''
     wrapper class for gRPC comms for Scenario Manager
     '''
@@ -87,10 +88,10 @@ class EcloudServerComms:
             ecloud_update = await stub_.Server_GetVehicleUpdates(ecloud.Empty())
             if len(ecloud_update.vehicle_update) == 0:
                 break
-            for v in ecloud_update.vehicle_update:
-                u = ecloud.VehicleUpdate()
-                u.CopyFrom(v)
-                vehicle_updates_list.append(u)
+            for veh in ecloud_update.vehicle_update:
+                upd = ecloud.VehicleUpdate()
+                upd.CopyFrom(veh)
+                vehicle_updates_list.append(upd)
             await asyncio.sleep(0.1)
 
         #logger.debug(f"{ecloud_update}")
@@ -147,10 +148,10 @@ class EcloudServerComms:
             ecloud_update = await stub_.Server_GetVehicleUpdates(ecloud.Empty())
             if len(ecloud_update.vehicle_update) == 0:
                 break
-            for v in ecloud_update.vehicle_update:
-                u = ecloud.VehicleUpdate()
-                u.CopyFrom(v)
-                vehicle_updates_list.append(u)
+            for veh in ecloud_update.vehicle_update:
+                upd = ecloud.VehicleUpdate()
+                upd.CopyFrom(veh)
+                vehicle_updates_list.append(upd)
             await asyncio.sleep(0.1)
 
         try:
@@ -158,12 +159,12 @@ class EcloudServerComms:
                 if not vehicle_update.HasField('transform') or not vehicle_update.HasField('velocity'):
                     continue
 
-                if not self.is_edge and vehicle_update.vehicle_index != ecloud_globals.__spectator_index__:
+                if not self.is_edge and vehicle_update.vehicle_index != ecloud_globals.Consts.SPECTATOR_INDEX:
                     continue
 
                 vehicle_manager_proxy = self.vehicle_managers[ vehicle_update.vehicle_index ]
                 if hasattr( vehicle_manager_proxy.vehicle, 'is_proxy' ):
-                    t = carla.Transform(
+                    tfm = carla.Transform(
                     carla.Location(
                         x=vehicle_update.transform.location.x,
                         y=vehicle_update.transform.location.y,
@@ -172,13 +173,13 @@ class EcloudServerComms:
                         yaw=vehicle_update.transform.rotation.yaw,
                         roll=vehicle_update.transform.rotation.roll,
                         pitch=vehicle_update.transform.rotation.pitch))
-                    v = carla.Vector3D(
+                    vec = carla.Vector3D(
                         x=vehicle_update.velocity.x,
                         y=vehicle_update.velocity.y,
                         z=vehicle_update.velocity.z)
-                    vehicle_manager_proxy.vehicle.set_velocity(v)
-                    vehicle_manager_proxy.vehicle.set_transform(t)
-        except Exception as r_e:
+                    vehicle_manager_proxy.vehicle.set_velocity(vec)
+                    vehicle_manager_proxy.vehicle.set_transform(tfm)
+        except RuntimeError as r_e:
             logger.error('failed to properly unpack updates - %s \n\t %s', r_e, vehicle_update)
             if EcloudConfig.fatal_errors:
                 raise
@@ -270,40 +271,84 @@ class EcloudServerComms:
         '''
         return self.client_node_count
 
-# end EcloudServerComms
-class EcloudClient:
+# end EcloudAPIToServerComms
+
+class EcloudClientToServerComms:
 
     '''
     Wrapper Class around gRPC Vehicle Client Calls
     '''
 
-    def __init__(self, channel: grpc.Channel) -> None:
-        self.channel = channel
+    def __init__(self, ip_ad: str, port: int) -> None:
+        self.channel = grpc.aio.insecure_channel(
+                        target=f"{ip_ad}:{port}",
+                        options=EcloudCommsConsts.GRPC_OPTIONS)
         self.stub = ecloud_rpc.EcloudStub(self.channel)
 
-    async def register_vehicle(self, update: ecloud.VehicleUpdate) -> ecloud.SimulationInfo:
+    def serialize_debug_info(self, vehicle_update, vehicle_manager) -> None:
         '''
-        send initial registration info to the eCloud server
+        serialize the debug data from the vehicle manager into a protobuf
         '''
+        planer_debug_helper = vehicle_manager.agent.debug_helper
+        planer_debug_helper_msg = ecloud.PlanerDebugHelper()
+        planer_debug_helper.serialize_debug_info(planer_debug_helper_msg)
+        vehicle_update.planer_debug_helper.CopyFrom( planer_debug_helper_msg )
+
+        loc_debug_helper = vehicle_manager.localizer.debug_helper
+        loc_debug_helper_msg = ecloud.LocDebugHelper()
+        loc_debug_helper.serialize_debug_info(loc_debug_helper_msg)
+        vehicle_update.loc_debug_helper.CopyFrom( loc_debug_helper_msg )
+
+        client_debug_helper = vehicle_manager.debug_helper
+        client_debug_helper_msg = ecloud.ClientDebugHelper()
+        client_debug_helper.serialize_debug_info(client_debug_helper_msg)
+        vehicle_update.client_debug_helper.CopyFrom(client_debug_helper_msg)
+
+    async def send_registration_to_ecloud_server(self, port) -> ecloud.SimulationInfo:
+        '''
+        register this container client with the eCloud server
+        '''
+        request = ecloud.RegistrationInfo()
+        request.vehicle_state = ecloud.VehicleState.REGISTERING
+        request.vehicle_port = port
+        try:
+            request.container_name = os.environ["HOSTNAME"]
+        except KeyError:
+            request.container_name = f"ecloud_client_{port}.py"
+
+        request.vehicle_ip = EcloudConfig.vehicle_ip
+
+        sim_info = await self.stub.Client_RegisterVehicle(request)
+
+        logger.info("vehicle ID %s received...", sim_info.vehicle_index)
+
+        return sim_info
+
+    async def send_carla_data_to_ecloud(self, vehicle_index, actor_id, vid) -> ecloud.SimulationInfo:
+        '''
+        send Carla actor data to eCloud server
+        '''
+        message = {"vehicle_index": vehicle_index, "actor_id": actor_id, "vid": vid}
+        logger.info("sending Carla rpc %s", message)
+
+        # send actor ID and vid to API
+        update = ecloud.RegistrationInfo()
+        update.vehicle_state = ecloud.VehicleState.CARLA_UPDATE
+        update.vehicle_index = vehicle_index
+        update.vid = vid
+        update.actor_id = actor_id
+
         sim_info = await self.stub.Client_RegisterVehicle(update)
 
         return sim_info
 
-    async def send_vehicle_update(self, update: ecloud.VehicleUpdate) -> ecloud.Empty:
+    async def send_vehicle_update(self, vehicle_update_) -> ecloud.Empty:
         '''
-        send a vehicle update to the eCloud server
+        push a vehicle update message to eCloud server
         '''
-        empty = await self.stub.Client_SendUpdate(update)
+        empty = await self.stub.Client_SendUpdate(vehicle_update_)
 
         return empty
-
-    async def get_waypoints(self, request: ecloud.WaypointRequest) -> ecloud.WaypointBuffer:
-        ''''
-        fetch Edge-derived waypoints from the eCloud server
-        '''
-        buffer = await self.stub.Client_GetWaypoints(request)
-
-        return buffer
 
 class EcloudPushServer(ecloud_rpc.EcloudServicer):
 
@@ -312,10 +357,10 @@ class EcloudPushServer(ecloud_rpc.EcloudServicer):
     '''
 
     def __init__(self,
-                 q: asyncio.Queue):
+                 que: asyncio.Queue):
 
         logger.info("eCloud push server initialized")
-        self.q = q
+        self.que = que
         self.last_tick = None
         self.last_tick_id = 0
         self.last_tick_command = None
@@ -348,33 +393,33 @@ class EcloudPushServer(ecloud_rpc.EcloudServicer):
             self.last_tick_last_client_duration_ns = tick.last_client_duration_ns
             logger.info("new tick - %s", tick)
 
-        assert self.q.empty()
+        assert self.que.empty()
         if is_dupe is False:
-            self.q.put_nowait(tick)
+            self.que.put_nowait(tick)
 
         return ecloud.Empty()
 
 async def ecloud_run_push_server(port,
-                                 q: asyncio.Queue) -> None:
+                                 que: asyncio.Queue) -> None:
     '''
     runs a simple listen server that accepts event-based message from the central ecloud gRPC server
     '''
 
     logger.info("spinning up eCloud push server")
     server = grpc.aio.server()
-    ecloud_rpc.add_EcloudServicer_to_server(EcloudPushServer(q), server)
+    ecloud_rpc.add_EcloudServicer_to_server(EcloudPushServer(que), server)
     try:
         listen_addr = f"0.0.0.0:{port}"
         server.add_insecure_port(listen_addr)
-    except Exception as port_exception:
+    except Exception as port_exception: # pylint: disable=broad-exception-caught
         logger.error("failed - %s: %s - to start push server on port %s - incrementing port & retrying",
                      type(port_exception), port_exception, port)
         port += 1
 
     logger.critical("starting eCloud push server on port %s", port)
 
-    if port >= ecloud_globals.__push_base_port__:
-        q.put_nowait(port)
+    if port >= ecloud_globals.Consts.PUSH_BASE_PORT:
+        que.put_nowait(port)
 
     await server.start()
     await server.wait_for_termination()

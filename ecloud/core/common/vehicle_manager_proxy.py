@@ -24,7 +24,7 @@ from ecloud.core.plan.behavior_agent \
     import BehaviorAgent
 from ecloud.core.common.data_dumper import DataDumper
 from ecloud.client_debug_helper import ClientDebugHelper
-from ecloud.core.common.ecloud_config import EcloudConfig, eLocationType
+from ecloud.core.common.ecloud_config import EcloudConfig, LocationType
 
 RESULT_SUCCESS = 0 # Step ran ok
 RESULT_ERROR = 1 # Step resulted in an error
@@ -108,7 +108,7 @@ class VehicleManagerProxy:
                 cav_world,
                 current_time='',
                 data_dumping=False,
-                location_type=eLocationType.EXPLICIT):
+                location_type=LocationType.EXPLICIT):
 
         # default initializers
         self.agent = None
@@ -122,7 +122,7 @@ class VehicleManagerProxy:
         self.is_edge = False
         if 'single_cav_list' in config_yaml['scenario']:
             self.cav_config = config_yaml['scenario']['single_cav_list'][vehicle_index] \
-                                if location_type == eLocationType.EXPLICIT \
+                                if location_type == LocationType.EXPLICIT \
                                 else config_yaml['scenario']['single_cav_list'][0]
 
         elif 'edge_list' in config_yaml['scenario']:

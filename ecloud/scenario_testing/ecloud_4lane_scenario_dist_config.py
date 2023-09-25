@@ -51,69 +51,70 @@ def run_scenario(opt, config_yaml):
     step = 0
     run_distributed = opt.distributed
 
+    scenario_params = load_yaml(config_yaml)
+
+    if opt.num_cars != 0:
+        assert 'ecloud' in scenario_params['scenario']
+        scenario_params['scenario']['ecloud']['num_cars'] = opt.num_cars
+        scenario_params['scenario']['ecloud']['location_type'] = 'random'
+
+    ecloud_config = EcloudConfig(scenario_params)
+    ecloud_config.set_fatal_errors(opt.fatal_errors)
+    step_count = ecloud_config.get_step_count() if opt.steps == 0 else opt.steps
+    # sanity checks...
+    assert 'edge_list' not in scenario_params['scenario'] # do NOT use this template for edge scenarios
+    assert 'sync_mode' in scenario_params['world'] and scenario_params['world']['sync_mode'] is True
+    assert scenario_params['world']['fixed_delta_seconds'] == 0.03 \
+            or scenario_params['world']['fixed_delta_seconds'] == 0.05
+
+    # spectator configs
+    world_x = scenario_params['world']['x_pos'] if 'x_pos' in scenario_params['world'] else 0
+    world_y = scenario_params['world']['y_pos'] if 'y_pos' in scenario_params['world'] else 0
+    world_z = scenario_params['world']['z_pos'] if 'z_pos' in scenario_params['world'] else 256
+    world_roll = scenario_params['world']['roll'] if 'roll' in scenario_params['world'] else 0
+    world_pitch = scenario_params['world']['pitch'] if 'pitch' in scenario_params['world'] else -90
+    world_yaw = scenario_params['world']['yaw'] if 'yaw' in scenario_params['world'] else 0
+
+    cav_world = CavWorld(opt.apply_ml)
+    # create scenario manager
+    scenario_manager = sim_api.ScenarioManager(scenario_params,
+                                                opt.apply_ml,
+                                                opt.version,
+                                                town=TOWN,
+                                                cav_world=cav_world,
+                                                distributed=run_distributed,
+                                                log_level=opt.log_level,
+                                                ecloud_config=ecloud_config,
+                                                run_carla=opt.run_carla)
+
+    if opt.record:
+        scenario_manager.client. \
+            start_recorder(LOG_NAME, True)
+
+    # create single cavs
+    if run_distributed:
+        asyncio.get_event_loop().run_until_complete(scenario_manager.run_comms())
+        single_cav_list = \
+            scenario_manager.create_distributed_vehicle_manager(application='single')
+
+    else:
+        single_cav_list = \
+            scenario_manager.create_vehicle_manager(application='single')
+
+    # create background traffic in carla
+    _, bg_veh_list = \
+        scenario_manager.create_traffic_carla()
+
+    # create evaluation manager
+    eval_manager = \
+        EvaluationManager(scenario_manager.cav_world,
+                            script_name=SCENARIO_NAME,
+                            current_time=scenario_params['current_time'])
+
+    spectator = scenario_manager.world.get_spectator()
+
+    # execute scenario
     try:
-        scenario_params = load_yaml(config_yaml)
-
-        if opt.num_cars != 0:
-            assert 'ecloud' in scenario_params['scenario']
-            scenario_params['scenario']['ecloud']['num_cars'] = opt.num_cars
-            scenario_params['scenario']['ecloud']['location_type'] = 'random'
-
-        ecloud_config = EcloudConfig(scenario_params)
-        ecloud_config.set_fatal_errors(opt.fatal_errors)
-        step_count = ecloud_config.get_step_count() if opt.steps == 0 else opt.steps
-        # sanity checks...
-        assert 'edge_list' not in scenario_params['scenario'] # do NOT use this template for edge scenarios
-        assert 'sync_mode' in scenario_params['world'] and scenario_params['world']['sync_mode'] is True
-        assert scenario_params['world']['fixed_delta_seconds'] == 0.03 \
-               or scenario_params['world']['fixed_delta_seconds'] == 0.05
-
-        # spectator configs
-        world_x = scenario_params['world']['x_pos'] if 'x_pos' in scenario_params['world'] else 0
-        world_y = scenario_params['world']['y_pos'] if 'y_pos' in scenario_params['world'] else 0
-        world_z = scenario_params['world']['z_pos'] if 'z_pos' in scenario_params['world'] else 256
-        world_roll = scenario_params['world']['roll'] if 'roll' in scenario_params['world'] else 0
-        world_pitch = scenario_params['world']['pitch'] if 'pitch' in scenario_params['world'] else -90
-        world_yaw = scenario_params['world']['yaw'] if 'yaw' in scenario_params['world'] else 0
-
-        cav_world = CavWorld(opt.apply_ml)
-        # create scenario manager
-        scenario_manager = sim_api.ScenarioManager(scenario_params,
-                                                   opt.apply_ml,
-                                                   opt.version,
-                                                   town=TOWN,
-                                                   cav_world=cav_world,
-                                                   distributed=run_distributed,
-                                                   log_level=opt.log_level,
-                                                   ecloud_config=ecloud_config,
-                                                   run_carla=opt.run_carla)
-
-        if opt.record:
-            scenario_manager.client. \
-                start_recorder(LOG_NAME, True)
-
-        # create single cavs
-        if run_distributed:
-            asyncio.get_event_loop().run_until_complete(scenario_manager.run_comms())
-            single_cav_list = \
-                scenario_manager.create_distributed_vehicle_manager(application='single')
-
-        else:
-            single_cav_list = \
-                scenario_manager.create_vehicle_manager(application='single')
-
-        # create background traffic in carla
-        _, bg_veh_list = \
-            scenario_manager.create_traffic_carla()
-
-        # create evaluation manager
-        eval_manager = \
-            EvaluationManager(scenario_manager.cav_world,
-                              script_name=SCENARIO_NAME,
-                              current_time=scenario_params['current_time'])
-
-        spectator = scenario_manager.world.get_spectator()
-
         flag = True
         while flag:
             print(f"ticking - step: {step}")
@@ -153,11 +154,8 @@ def run_scenario(opt, config_yaml):
                     flag = scenario_manager.broadcast_message(ecloud.Command.REQUEST_DEBUG_INFO)
                 break
 
-    except SystemExit:
-        logger.info('system exit')
-
-    except Exception as scenario_error:
-        logger.exception("exception hit during scenario execution: %s - %s", type(scenario_error), scenario_error)
+    except RuntimeError as scenario_error:
+        logger.exception("runtime error hit during scenario execution: %s - %s", type(scenario_error), scenario_error)
         if opt.fatal_errors:
             raise
 
@@ -171,20 +169,18 @@ def run_scenario(opt, config_yaml):
         if opt.record:
             scenario_manager.client.stop_recorder()
 
+    finally:
         scenario_manager.close()
 
         if not run_distributed:
             for veh in single_cav_list:
                 try:
                     veh.destroy()
-                except Exception as destroy_error:
+                except RuntimeError as destroy_error:
                     logger.error('%s: failed to destroy single CAV', type(destroy_error))
 
         for veh in bg_veh_list:
-            logger.warning("destroying background vehicle")
             try:
                 veh.destroy()
-            except Exception as destroy_error:
+            except RuntimeError as destroy_error:
                 logger.warning("%s: failed to destroy background vehicle", type(destroy_error))
-
-    #finally:

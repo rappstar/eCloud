@@ -10,7 +10,7 @@ import logging
 
 import coloredlogs
 
-class eLocationType(Enum):
+class LocationType(Enum):
     '''
     enum for spawn & destination location types
     '''
@@ -18,7 +18,7 @@ class eLocationType(Enum):
     EXPLICIT = 1
     COUNT = 2
 
-class eDoneBehavior(Enum):
+class DoneBehavior(Enum):
     '''
     enum for behavior of a specific vehicle upon completing its route
     '''
@@ -63,12 +63,12 @@ class EcloudConfig:
 
     fatal_errors = False
 
-    location_types = { RANDOM : eLocationType.RANDOM,
-                       EXPLICIT : eLocationType.EXPLICIT }
+    location_types = { RANDOM : LocationType.RANDOM,
+                       EXPLICIT : LocationType.EXPLICIT }
 
-    done_behavior_types = { DESTROY : eDoneBehavior.DESTROY,
-                            CONTROL : eDoneBehavior.CONTROL,
-                            DRIVE   : eDoneBehavior.DRIVE }
+    done_behavior_types = { DESTROY : DoneBehavior.DESTROY,
+                            CONTROL : DoneBehavior.CONTROL,
+                            DRIVE   : DoneBehavior.DRIVE }
 
 
     # TODO: move actual inits to @staticmethod
@@ -143,7 +143,7 @@ class EcloudConfig:
         return self.ecloud_scenario['step_count']
 
     @staticmethod
-    def set_fatal_errors(b):
+    def set_fatal_errors(do_fatal):
         '''
         a lot of the code runs inside of try/except blocks, which helps with doing cleanup if an error occurs.
 
@@ -152,7 +152,7 @@ class EcloudConfig:
 
         note that this means you may need to do some additional manual process cleanup of Carla and/or the gRPC server
         '''
-        EcloudConfig.fatal_errors = b
+        EcloudConfig.fatal_errors = do_fatal
 
     @staticmethod
     def get_log_level():

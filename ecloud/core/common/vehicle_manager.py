@@ -28,7 +28,7 @@ from ecloud.core.plan.behavior_agent \
 from ecloud.core.common.data_dumper import DataDumper
 from ecloud.core.common.misc import compute_distance
 from ecloud.client_debug_helper import ClientDebugHelper
-from ecloud.core.common.ecloud_config import eLocationType
+from ecloud.core.common.ecloud_config import LocationType
 
 logger = logging.getLogger("ecloud")
 
@@ -94,7 +94,7 @@ class VehicleManager:
                  carla_version='0.9.12',
                  current_time='',
                  data_dumping=False,
-                 location_type=eLocationType.EXPLICIT,
+                 location_type=LocationType.EXPLICIT,
                  run_distributed=False,
                  map_helper=None,
                  is_edge=False,
@@ -115,7 +115,7 @@ class VehicleManager:
         if 'seed' in config_yaml['world']:
             seed = config_yaml['world']['seed']
 
-        if self.location_type == eLocationType.RANDOM:
+        if self.location_type == LocationType.RANDOM:
             assert 'seed' in config_yaml['world']
             seed = seed + self.vehicle_index # speeds up finding a start
 
@@ -126,7 +126,7 @@ class VehicleManager:
         cav_config = None
         if not is_edge:
             cav_config = self.scenario_params['scenario']['single_cav_list'][vehicle_index] \
-                        if location_type == eLocationType.EXPLICIT \
+                        if location_type == LocationType.EXPLICIT \
                         else self.scenario_params['scenario']['single_cav_list'][0]
 
         # ORIGINAL FLOW
@@ -162,7 +162,7 @@ class VehicleManager:
                 if 'spawn_special' in cav_config:
                     self.spawn_transform = map_helper(self.carla_version,
                                              *cav_config['spawn_special'])
-                elif location_type == eLocationType.EXPLICIT:
+                elif location_type == LocationType.EXPLICIT:
                     self.spawn_transform = carla.Transform(
                     carla.Location(
                         x=cav_config['spawn_position'][0],
@@ -188,7 +188,7 @@ class VehicleManager:
                             y=self.destination['y'],
                             z=self.destination['z'])
 
-                elif location_type == eLocationType.RANDOM:
+                elif location_type == LocationType.RANDOM:
                     spawn_points = self.world.get_map().get_spawn_points()
                     self.spawn_transform = spawn_points[random.randint(0, len(spawn_points) - 1)]
                     self.spawn_location = carla.Location(
@@ -205,7 +205,7 @@ class VehicleManager:
 
                 logger.debug("spawned @ %s", self.spawn_transform)
 
-                if location_type == eLocationType.RANDOM:
+                if location_type == LocationType.RANDOM:
                     dist = 0
                     min_dist = MIN_DESTINATION_DISTANCE_M
                     count = 0
@@ -231,7 +231,7 @@ class VehicleManager:
 
                 spawned = True
 
-            except Exception as spawn_error:
+            except Exception as spawn_error: # pylint: disable=broad-exception-caught
                 if COLLISION_ERROR not in f'{spawn_error}':
                     logger.error("exception during spawn: %s - %s", type(spawn_error), spawn_error)
 
@@ -398,12 +398,12 @@ class VehicleManager:
         # eCLOUD - must check FIRST to ensure sim doesn't try to progress a DONE vehicle
         if target_speed == -1 and self.run_distributed:
             logger.info("run_step: simulation is over")
-            return None # -1 indicates the simulation is over. TODO Need a const here.
+            return None
 
         pre_vehicle_step_time = time.time()
         try:
             target_speed, target_pos = self.agent.run_step(target_speed)
-        except Exception as trace_error:
+        except Exception as trace_error: # pylint: disable=broad-exception-caught
             logger.error("%s - %s: can't successfully _trace_route; setting to done.", type(trace_error), trace_error)
             target_speed = 0
             ego_pos = self.localizer.get_ego_pos()

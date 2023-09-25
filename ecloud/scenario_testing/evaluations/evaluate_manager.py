@@ -19,9 +19,9 @@ import ecloud.core.plan.drive_profile_plotting as open_plt
 
 from ecloud.scenario_testing.evaluations.utils import lprint
 from ecloud.client_debug_helper import ClientDebugHelper
-from ecloud.globals import __ecloud__
+from ecloud.globals import Consts
 
-logger = logging.getLogger(__ecloud__)
+logger = logging.getLogger(Consts.ECLOUD)
 
 class EvaluationManager:
     """

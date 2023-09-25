@@ -35,7 +35,7 @@ from ecloud.sim_debug_helper import SimDebugHelper
 import ecloud.globals as ecloud_globals
 from ecloud.globals import EnvironmentConfig
 from ecloud.core.common.ecloud_config import EcloudConfig
-from ecloud.ecloud_server.ecloud_comms import EcloudComms, EcloudServerComms, ecloud_run_push_server
+from ecloud.ecloud_server.ecloud_comms import EcloudCommsConsts, EcloudAPIToServerComms, ecloud_run_push_server
 
 import ecloud_pb2 as ecloud
 import ecloud_pb2_grpc as ecloud_rpc
@@ -127,7 +127,7 @@ class ScenarioManager:
     vehicle_managers = {}
     vehicle_count = 0
 
-    carla_version = ecloud_globals.__carla_version__
+    carla_version = ecloud_globals.Consts.CARLA_VERSION
     application = 'single'
     scenario = None
     ecloud_server = None
@@ -136,13 +136,13 @@ class ScenarioManager:
 
     debug_helper = SimDebugHelper(0)
     sm_start_tstamp = Timestamp()
-    SPECTATOR_INDEX = ecloud_globals.__spectator_index__
+    SPECTATOR_INDEX = ecloud_globals.Consts.SPECTATOR_INDEX
 
     debug_helper = SimDebugHelper(0)
 
     def __init__(self, scenario_params,
                  apply_ml,
-                 carla_version=ecloud_globals.__carla_version__,
+                 carla_version=ecloud_globals.Consts.CARLA_VERSION,
                  xodr_path=None,
                  town=None,
                  cav_world=None,
@@ -159,7 +159,8 @@ class ScenarioManager:
         # TODO: move these to EcloudConfig
         self.scenario_params = scenario_params
         self.carla_version = carla_version
-        self.perception = scenario_params['perception_active'] if 'perception_active' in scenario_params else False
+        self.perception = scenario_params['perception_active'] \
+                            if 'perception_active' in scenario_params else False
 
         # empty initializers
         self.carla_process = None
@@ -184,9 +185,9 @@ class ScenarioManager:
             logger.info("setting server log level to %s", server_log_level)
             try:
                 ecloud_pid = subprocess.check_output(['pgrep','ecloud_server'])
-            except subprocess.CalledProcessError as e:
-                if e.returncode > 1:
-                    logger.error("exception trying to check for running server %s", e)
+            except subprocess.CalledProcessError as err:
+                if err.returncode > 1:
+                    logger.error("exception trying to check for running server %s", err)
                     if ecloud_config.fatal_errors:
                         raise
                 ecloud_pid = None
@@ -198,8 +199,7 @@ class ScenarioManager:
             # self.ecloud_server_process = subprocess.Popen(['sudo','perf','record','-g',
             # './opencda/ecloud_server/ecloud_server',f'--minloglevel={server_log_level}'],
             # stderr=sys.stdout.buffer)
-            # TODO move path to globals
-            self.ecloud_server_process = subprocess.Popen([ecloud_globals.__ecloud_server_path__,
+            self.ecloud_server_process = subprocess.Popen([ecloud_globals.Consts.ECLOUD_SERVER_PATH,
                                                            f'--minloglevel={server_log_level}'],
                                                            stderr=sys.stdout.buffer)
 
@@ -207,9 +207,9 @@ class ScenarioManager:
             try:
                 carla_pid = subprocess.check_output(['pgrep','CarlaUE4'])
 
-            except subprocess.CalledProcessError as e:
-                if e.returncode > 1:
-                    logger.error("failed to check for running Carla - %s", e)
+            except subprocess.CalledProcessError as err:
+                if err.returncode > 1:
+                    logger.error("failed to check for running Carla - %s", err)
                 carla_pid = None
 
             if carla_pid is not None:
@@ -236,7 +236,7 @@ class ScenarioManager:
             random.seed(simulation_config['seed'])
 
         self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])
-        self.client.set_timeout(EcloudComms.TIMEOUT_S)
+        self.client.set_timeout(EcloudCommsConsts.TIMEOUT_S)
 
         if xodr_path:
             self.world = load_customized_world(xodr_path, self.client)
@@ -245,8 +245,8 @@ class ScenarioManager:
             try:
                 self.world = self.client.load_world(town)
 
-            except Exception as e:
-                logger.critical("%s - %s not found in CARLA repo - download all town maps.", e, town)
+            except RuntimeError as err:
+                logger.critical("%s - %s not found in CARLA repo - download all town maps.", err, town)
 
         else:
             self.world = self.client.get_world()
@@ -299,8 +299,8 @@ class ScenarioManager:
             self.apply_ml = False
 
             channel = grpc.aio.insecure_channel(
-                        target=f"{EcloudConfig.ecloud_ip}:{ecloud_globals.__server_port__}",
-                        options=EcloudComms.GRPC_OPTIONS)
+                        target=f"{EcloudConfig.ecloud_ip}:{ecloud_globals.Consts.SERVER_PORT}",
+                        options=EcloudCommsConsts.GRPC_OPTIONS)
             self.ecloud_server = ecloud_rpc.EcloudStub(channel)
 
             self.debug_helper.update_sim_start_timestamp(time.time())
@@ -320,7 +320,7 @@ class ScenarioManager:
         push scenario data up to the eCloud gRPC server
         '''
         self.push_q = asyncio.Queue()
-        self.push_server = asyncio.create_task(ecloud_run_push_server(ecloud_globals.__push_api_port__, self.push_q))
+        self.push_server = asyncio.create_task(ecloud_run_push_server(ecloud_globals.Consts.PUSH_API_PORT, self.push_q))
 
         await asyncio.sleep(1) # this yields CPU to allow the PushServer to start
 
@@ -331,7 +331,7 @@ class ScenarioManager:
         server_request.vehicle_index = self.vehicle_count # bit of a hack to use vindex as count here
         server_request.is_edge = self.is_edge
 
-        self.comms_manager = EcloudServerComms(vehicle_managers=self.vehicle_managers,
+        self.comms_manager = EcloudAPIToServerComms(vehicle_managers=self.vehicle_managers,
                                                debug_helper=self.debug_helper,
                                                is_edge=self.is_edge,
                                                push_q=self.push_q,
@@ -482,7 +482,7 @@ class ScenarioManager:
 
         return platoon_list
 
-    def spawn_vehicles_by_list(self, tm, traffic_config, bg_list):
+    def spawn_vehicles_by_list(self, tmg, traffic_config, bg_list):
         """
         Spawn the traffic vehicles by the given list.
 
@@ -536,15 +536,15 @@ class ScenarioManager:
             vehicle.set_autopilot(True, 8000)
 
             if 'vehicle_speed_perc' in vehicle_config:
-                tm.vehicle_percentage_speed_difference(
+                tmg.vehicle_percentage_speed_difference(
                     vehicle, vehicle_config['vehicle_speed_perc'])
-            tm.auto_lane_change(vehicle, traffic_config['auto_lane_change'])
+            tmg.auto_lane_change(vehicle, traffic_config['auto_lane_change'])
 
             bg_list.append(vehicle)
 
         return bg_list
 
-    def spawn_vehicle_by_range(self, tm, traffic_config, bg_list):
+    def spawn_vehicle_by_range(self, tmg, traffic_config, bg_list):
         """
         Spawn the traffic vehicles by the given range.
 
@@ -582,9 +582,9 @@ class ScenarioManager:
                 math.floor(spawn_range[0]), math.ceil(spawn_range[1]), \
                 math.floor(spawn_range[2]), math.ceil(spawn_range[3])
 
-            for x in range(x_min, x_max, int(spawn_range[4])):
-                for y in range(y_min, y_max, int(spawn_range[5])):
-                    location = carla.Location(x=x, y=y, z=0.3)
+            for x_coord in range(x_min, x_max, int(spawn_range[4])):
+                for y_coord in range(y_min, y_max, int(spawn_range[5])):
+                    location = carla.Location(x=x_coord, y=y_coord, z=0.3)
                     way_point = self.carla_map.get_waypoint(location).transform
 
                     spawn_set.add((way_point.location.x,
@@ -629,15 +629,15 @@ class ScenarioManager:
                 continue
 
             vehicle.set_autopilot(True, 8000)
-            tm.auto_lane_change(vehicle, traffic_config['auto_lane_change'])
+            tmg.auto_lane_change(vehicle, traffic_config['auto_lane_change'])
 
             if 'ignore_lights_percentage' in traffic_config:
-                tm.ignore_lights_percentage(vehicle,
+                tmg.ignore_lights_percentage(vehicle,
                                             traffic_config[
                                                 'ignore_lights_percentage'])
 
             # each vehicle have slight different speed
-            tm.vehicle_percentage_speed_difference(
+            tmg.vehicle_percentage_speed_difference(
                 vehicle,
                 traffic_config['global_speed_perc'] + random.randint(-30, 30))
 
@@ -660,27 +660,27 @@ class ScenarioManager:
         """
         logger.info('Spawning CARLA traffic flow.')
         traffic_config = self.scenario_params['carla_traffic_manager']
-        tm = self.client.get_trafficmanager()
+        tmg = self.client.get_trafficmanager()
 
-        tm.set_global_distance_to_leading_vehicle(
+        tmg.set_global_distance_to_leading_vehicle(
             traffic_config['global_distance'])
-        tm.set_synchronous_mode(traffic_config['sync_mode'])
-        tm.set_osm_mode(traffic_config['set_osm_mode'])
-        tm.global_percentage_speed_difference(
+        tmg.set_synchronous_mode(traffic_config['sync_mode'])
+        tmg.set_osm_mode(traffic_config['set_osm_mode'])
+        tmg.global_percentage_speed_difference(
             traffic_config['global_speed_perc'])
 
         bg_list = []
 
         if isinstance(traffic_config['vehicle_list'], list):
-            bg_list = self.spawn_vehicles_by_list(tm,
+            bg_list = self.spawn_vehicles_by_list(tmg,
                                                   traffic_config,
                                                   bg_list)
 
         else:
-            bg_list = self.spawn_vehicle_by_range(tm, traffic_config, bg_list)
+            bg_list = self.spawn_vehicle_by_range(tmg, traffic_config, bg_list)
 
         logger.info('CARLA traffic flow generated.')
-        return tm, bg_list
+        return tmg, bg_list
 
     # END Core OpenCDA
 
@@ -694,8 +694,8 @@ class ScenarioManager:
                 logger.info("destroying specator CAV")
                 try:
                     spectator.destroy()
-                except Exception as e:
-                    logger.error("failed to destroy single CAV - %s", e)
+                except RuntimeError as err:
+                    logger.error("failed to destroy single CAV - %s", err)
 
             subprocess.Popen(['pkill','-9','CarlaUE4'])
             sys.exit(0)
@@ -762,9 +762,9 @@ class ScenarioManager:
     def create_edge_manager(self,
                             application,
                             data_dump=False,
-                            world_dt=ecloud_globals.__world_dt__,
-                            edge_dt=ecloud_globals.__edge_dt__,
-                            search_dt=ecloud_globals.__edge_search_t__):
+                            world_dt=ecloud_globals.Consts.WORLD_DT,
+                            edge_dt=ecloud_globals.Consts.EDGE_DT,
+                            search_dt=ecloud_globals.Consts.EDGE_SEARCH_DT):
         """
         Create a list of edges.
 
