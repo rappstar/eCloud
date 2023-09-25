@@ -238,7 +238,7 @@ class ScenarioManager:
         try:
             self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])    
             self.client.set_timeout(EcloudCommsConsts.TIMEOUT_S)
-        
+
         except RuntimeError as err:
             logger.exception("%s - failed to connect to Carla", err)
             return
