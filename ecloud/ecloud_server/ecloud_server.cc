@@ -11,6 +11,7 @@
 #include <csignal>
 #include <unistd.h>
 #include <chrono>
+#include <unordered_map>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
@@ -94,13 +95,15 @@ VehicleState vehState_;
 Command command_;
 
 std::vector<std::pair<int16_t, std::string>> serializedEdgeWaypoints_; // vehicleIdx, serializedWPBuffer
+std::unordered_map<int16_t, std::string> pendingReplies_; // vehIdx --> serializedProto: serializing allows messages of differing types
 
+// at startup, it's critical that we only register individual clients once and count nodes properly
+// on subsequent ticks, the hashmap protects against repeat messages 
 absl::Mutex mu_;
 
 volatile std::atomic<int8_t> nodeCount_ ABSL_GUARDED_BY(mu_);
 volatile std::atomic<int16_t> numRegisteredVehicles_ ABSL_GUARDED_BY(mu_);
 std::vector<std::string> clientNodes_ ABSL_GUARDED_BY(mu_);
-std::vector<std::string> pendingReplies_ ABSL_GUARDED_BY(mu_); // TODO: Move to a hashmap serialized protobuf allows differing message types in same vector
 
 class PushClient
 {
@@ -183,23 +186,31 @@ public:
 
         DLOG(INFO) << "Server_GetVehicleUpdates - deserializing updates.";
 
-        const int16_t replies = pendingReplies_.size();
-        for ( int i = 0; i < replies; i++ )
+        static int16_t k_replyVehIdx = 0;
+        do
         {
-            VehicleUpdate *update = reply->add_vehicle_update();
-            const std::string msg = pendingReplies_.back();
-            pendingReplies_.pop_back();
-            update->ParseFromString(msg);
-            DLOG(INFO) << "update: vehicle_index - " << update->vehicle_index();
+            assert( pendingReplies_.find(k_replyVehIdx) != pendingReplies_.end() );
+            
+            const std::string msg = pendingReplies_.at(k_replyVehIdx);
+            if( msg.c_str()[0] != '\0' )
+            {
+                VehicleUpdate *update = reply->add_vehicle_update();
+                update->ParseFromString(msg);
+                pendingReplies_.at(k_replyVehIdx) = "";
 
-            if ( i == absl::GetFlag(FLAGS_vehicle_update_batch_size) ) // keep from exhausting resources
-                break;
-        }
+                DLOG(INFO) << "update: vehicle_index - " << update->vehicle_index();
+            }
+            k_replyVehIdx++;
 
-        DLOG(INFO) << "Server_GetVehicleUpdates - updates deserialized.";
+        } while ( ( k_replyVehIdx < pendingReplies_.size() ) && ( k_replyVehIdx % absl::GetFlag(FLAGS_vehicle_update_batch_size) != 0 ) );
 
-        if ( pendingReplies_.size() == 0 )
+        DLOG(INFO) << "Server_GetVehicleUpdates - updates deserialized up to vehicle index " << k_replyVehIdx;
+
+        if ( k_replyVehIdx == numCars_ )
+        {
             numRepliedVehicles_ = 0;
+            k_replyVehIdx = 0;
+        }
     
         ServerUnaryReactor* reactor = context->DefaultReactor();
         reactor->Finish(Status::OK);
@@ -209,41 +220,42 @@ public:
     ServerUnaryReactor* Client_SendUpdate(CallbackServerContext* context,
                                const VehicleUpdate* request,
                                Empty* empty) override {
-
-        if ( isEdge_ || request->vehicle_index() == SPECTATOR_INDEX || request->vehicle_state() == VehicleState::TICK_DONE || request->vehicle_state() == VehicleState::DEBUG_INFO_UPDATE )
+        /* interesting options here:
+         * - we could enforce a maximum time limit for individual vehicles to respond. it's not clear the sim breaks if we miss a tick
+         * - we could enforce a minumum % completion limit for invidual vehicle responses.
+         */
+        const int16_t vIdx = request->vehicle_index();
+        LOG_IF(ERROR, pendingReplies_.at(vIdx).c_str()[0] != '\0') << "Client_SendUpdate received a reply for vehicle " << vIdx << " that already had a pending reply stored";
+        // has not proven necessary, but we can enforce uniqueness of replies with: if ( pendingReplies_.at(vIdx).c_str()[0] == '\0' )
+        const VehicleState vState = request->vehicle_state();
+        bool storeAll = isEdge_ || vState == VehicleState::TICK_DONE || vState == VehicleState::DEBUG_INFO_UPDATE;
+        if ( storeAll || vIdx == SPECTATOR_INDEX )
         {
+            assert( pendingReplies_.find(vIdx) != pendingReplies_.end() );
+            assert( storeAll || ( !storeAll && vIdx == SPECTATOR_INDEX ) );
+            assert( ( request->tick_id() > 0 && request->tick_id() == tickId_.load() ) || request->tick_id() <= 0 );
+
             std::string msg;
             request->SerializeToString(&msg);
-            if ( isEdge_ || request->vehicle_state() == VehicleState::TICK_DONE || request->vehicle_state() == VehicleState::DEBUG_INFO_UPDATE )
-            {
-                // TODO: hashmap
-                mu_.Lock();
-                pendingReplies_.push_back(msg);
-                mu_.Unlock();
-            }
-            else
-            {
-                assert( request->vehicle_index() == SPECTATOR_INDEX );
-                pendingReplies_.push_back(msg);
-            }
+            pendingReplies_.at(vIdx) = msg;
         }
 
 #ifdef _DEBUG
-        repliedCars_[request->vehicle_index()] = true;
+        repliedCars_[vIdx] = true;
 #endif
 
-        DLOG(INFO) << "Client_SendUpdate - received reply from vehicle " << request->vehicle_index() << " for tick id:" << request->tick_id();
+        DLOG(INFO) << "Client_SendUpdate - received reply from vehicle " << vIdx << " for tick id:" << request->tick_id();
 
-        if ( request->vehicle_state() == VehicleState::TICK_DONE )
+        if ( vState == VehicleState::TICK_DONE )
         {
             numCompletedVehicles_++;
-            DLOG(INFO) << "Client_SendUpdate - TICK_DONE - tick id: " << tickId_ << " vehicle id: " << request->vehicle_index();
+            DLOG(INFO) << "Client_SendUpdate - TICK_DONE - tick id: " << tickId_ << " vehicle id: " << vIdx;
         }
-        else if ( request->vehicle_state() == VehicleState::TICK_OK )
+        else if ( vState == VehicleState::TICK_OK )
         {
             numRepliedVehicles_++;
         }
-        else if ( request->vehicle_state() == VehicleState::DEBUG_INFO_UPDATE )
+        else if ( vState == VehicleState::DEBUG_INFO_UPDATE )
         {
             numCompletedVehicles_++;
             DLOG(INFO) << "Client_SendUpdate - DEBUG_INFO_UPDATE - tick id: " << tickId_ << " vehicle id: " << request->vehicle_index();
@@ -304,7 +316,8 @@ public:
             DLOG(INFO) << "got a registration update";
 
             mu_.Lock();
-            reply->set_vehicle_index(numRegisteredVehicles_.load());
+            const int16_t vIdx = numRegisteredVehicles_.load();
+            reply->set_vehicle_index(vIdx);
             const std::string connection = absl::StrFormat("%s:%d", request->vehicle_ip(), request->vehicle_port());
             const std::string ip = request->vehicle_ip();
             if ( std::find( clientNodes_.begin(), clientNodes_.end(), ip ) == clientNodes_.end() )
@@ -314,6 +327,7 @@ public:
             }
             PushClient *vehicleClient = new PushClient(grpc::CreateChannel(connection, grpc::InsecureChannelCredentials()), connection);
             vehicleClients_.push_back(std::move(vehicleClient));
+            pendingReplies_.insert(std::make_pair(vIdx, ""));
             numRegisteredVehicles_++;
             mu_.Unlock();
 
@@ -329,32 +343,41 @@ public:
         }
         else if ( request->vehicle_state() == VehicleState::CARLA_UPDATE )
         {
-            reply->set_vehicle_index(request->vehicle_index());
+            const int16_t vIdx = request->vehicle_index();
+            reply->set_vehicle_index(vIdx);
 
-            DLOG(INFO) << "RegisterVehicle - CARLA_UPDATE - vehicle_index: " << request->vehicle_index() << " | actor_id: " << request->actor_id() << " | vid: " << request->vid();
+            DLOG(INFO) << "RegisterVehicle - CARLA_UPDATE - vehicle_index: " << vIdx << " | actor_id: " << request->actor_id() << " | vid: " << request->vid();
 
-            // TODO: Hashmap
-            mu_.Lock();
-            std::string msg;
-            request->SerializeToString(&msg);
-            pendingReplies_.push_back(msg);
-            numRepliedVehicles_++;
-            mu_.Unlock();
+            std::string msg = pendingReplies_.at(vIdx);
+            LOG_IF(INFO, msg.c_str()[0] != '\0') << vIdx << " had stored message: " << msg;
+            if( msg.c_str()[0] == '\0' )
+            {
+                request->SerializeToString(&msg);
+                pendingReplies_.at(vIdx) = msg;
+                numRepliedVehicles_++;
+            }
         }
         else
         {
             assert(false);
         }
 
-        const int16_t replies_ = numRepliedVehicles_.load();
-        LOG(INFO) << "received " << replies_ << " replies";
-        
-        const bool complete_ = ( replies_ == numCars_ );
-        LOG_IF(INFO, complete_ ) << "REGISTRATION COMPLETE";
-        if ( complete_ )
+        if ( numRegisteredVehicles_ < numCars_ )
         {
-            assert( vehState_ == VehicleState::REGISTERING && replies_ == pendingReplies_.size() );
-            simAPIClient_->PushTick( nodeCount_.load(), command_, INVALID_TIME);
+            LOG(INFO) << "received " << numRegisteredVehicles_.load() << " registrations";
+        }
+        else
+        {
+            const int16_t replies_ = numRepliedVehicles_.load();
+            LOG(INFO) << "received " << replies_ << " replies";
+        
+            const bool complete_ = ( replies_ == numCars_ );
+            LOG_IF(INFO, complete_ ) << "REGISTRATION COMPLETE";
+            if ( complete_ )
+            {
+                assert( vehState_ == VehicleState::REGISTERING && replies_ == pendingReplies_.size() );
+                simAPIClient_->PushTick( nodeCount_.load(), command_, INVALID_TIME);
+            }
         }
 
         ServerUnaryReactor* reactor = context->DefaultReactor();
