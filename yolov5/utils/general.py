@@ -112,13 +112,13 @@ def set_logging(name=None, verbose=VERBOSE):
     log = logging.getLogger(name)
     log.setLevel(level)
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(logging.Formatter("YOLO %(message)s"))
     handler.setLevel(level)
     log.addHandler(handler)
 
 
 set_logging()  # run before defining LOGGER
-LOGGER = logging.getLogger("yolov5")  # define globally (used in train.py, val.py, detect.py, etc.)
+LOGGER = logging.getLogger("ecloud")  # define globally (used in train.py, val.py, detect.py, etc.)
 if platform.system() == 'Windows':
     for fn in LOGGER.info, LOGGER.warning:
         setattr(LOGGER, fn.__name__, lambda x: fn(emojis(x)))  # emoji safe logging
