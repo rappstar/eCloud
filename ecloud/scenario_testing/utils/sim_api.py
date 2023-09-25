@@ -236,7 +236,7 @@ class ScenarioManager:
             random.seed(simulation_config['seed'])
 
         try:
-            self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])    
+            self.client = carla.Client(EcloudConfig.carla_ip, simulation_config['client_port'])
             self.client.set_timeout(EcloudCommsConsts.TIMEOUT_S)
 
         except RuntimeError as err:
@@ -318,6 +318,12 @@ class ScenarioManager:
 
         else: # sequential
             self.debug_helper.update_sim_start_timestamp(time.time())
+
+    def init_networking(self):
+        '''
+        wrapper to avoid having scenarios worry about asyncio
+        '''
+        asyncio.get_event_loop().run_until_complete(self.run_comms())
 
     async def run_comms(self):
         '''
@@ -905,7 +911,7 @@ class ScenarioManager:
         """
         edge_wp = ecloud.EdgeWaypoints()
         for wpb_proto in waypoint_buffer:
-            #logger.debug(waypoint_buffer_proto.SerializeToString())
+            logger.debug('wpb_proto: %s', wpb_proto)
             edge_wp.all_waypoint_buffers.extend([wpb_proto])
 
         asyncio.get_event_loop().run_until_complete(self.comms_manager.server_push_waypoints(self.ecloud_server, edge_wp))

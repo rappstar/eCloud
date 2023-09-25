@@ -51,6 +51,8 @@ def arg_parse():
                             help="Run Carla with optional args; use = --run_carla='-RenderOffscreen'")
     parser.add_argument('-f', "--fatal_errors", action='store_true',
                         help="will raise exceptions when set to allow for easier debugging")
+    parser.add_argument('-g', "--edge", action='store_true',
+                        help="run the default Edge scenario on Town 06. MUST specify num_cars")
 
     # SEQUENTIAL ONLY
     parser.add_argument("--apply_ml",
@@ -89,7 +91,7 @@ def check_imports():
                             except ModuleNotFoundError as module_error:
                                 if module not in missing_imports and f"{module_error}" not in missing_imports.values():
                                     missing_imports[module] = f"{module_error}"
-                                    logger.error("failed importing %s - %s", module, module_error)
+                                    logger.error("failed importing %s for file %s - %s", module, file, module_error)
                                 continue
                             else:
                                 logger.debug("module %s imported OK", module)
@@ -102,7 +104,7 @@ def check_imports():
                             except ModuleNotFoundError as class_error:
                                 if module not in missing_imports and f"{class_error}" not in missing_imports.values():
                                     missing_imports[module] = f"{class_error}"
-                                    logger.error("failed importing %s - %s", module, class_error)
+                                    logger.error("failed importing %s for file %s - %s", module, file, class_error)
                                 continue
                             else:
                                 logger.debug("module %s imported OK", module)
@@ -111,6 +113,8 @@ def get_scenario(opt):
     '''
     fetch the desired scenario module & associatd YAML
     '''
+    assert '.py' not in opt.test_scenario
+
     testing_scenario = None
     config_yaml = None
     error = None
@@ -118,20 +122,26 @@ def get_scenario(opt):
         testing_scenario = importlib.import_module(f"ecloud.scenario_testing.{opt.test_scenario}")
     except ModuleNotFoundError:
         error = f"{opt.test_scenario}.py not found under ecloud/scenario_testing"
+        logger.exception(error)
 
     if error is not None:
         try:
             testing_scenario = importlib.import_module(f"ecloud.scenario_testing.archived.{opt.test_scenario}")
         except ModuleNotFoundError:
             error = f"{opt.test_scenario}.py not found under ecloud/scenario_testing[/archived]"
+            logger.exception(error)
 
-    config_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                               f'ecloud/scenario_testing/config_yaml/{opt.test_scenario}.yaml')
+    if opt.edge:
+        yaml = f'ecloud/scenario_testing/config_yaml/{opt.test_scenario}_{opt.num_cars}_car.yaml'
+    else:
+        yaml = f'ecloud/scenario_testing/config_yaml/{opt.test_scenario}.yaml'
+    config_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), yaml)
     if not os.path.isfile(config_yaml):
         config_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                f'ecloud/scenario_testing/config_yaml/archived/{opt.test_scenario}.yaml')
         if not os.path.isfile(config_yaml):
-            error = f"ecloud/scenario_testing/config_yaml/[archived/]{opt.test_scenario}.yaml not found!"
+            error = f"ecloud/scenario_testing/config_yaml/[archived/]{yaml} not found!"
+            logger.exception(error)
 
     return testing_scenario, config_yaml, error
 
@@ -144,6 +154,11 @@ def main():
     logger.debug(opt)
 
     print(f"eCloudSim Version: {__version__}")
+
+    if opt.edge:
+        assert opt.num_cars != 0
+        assert opt.num_cars == 8 or opt.num_cars == 16 # add a new YAML otherwise
+        opt.test_scenario = ecloud_globals.Consts.DEFAULT_EDGE_SCENARIO
 
     testing_scenario, config_yaml, error = get_scenario(opt)
     if error is not None:

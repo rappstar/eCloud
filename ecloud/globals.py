@@ -20,7 +20,8 @@ class Consts:
     LOCALHOST = "localhost"
     AZURE = "azure"
     CARLA_VERSION = "0.9.12"
-    DEFAULT_SCENARIO = "ecloud_4lane_scenario_dist_config"
+    DEFAULT_SCENARIO = "ecloud_town06_config"
+    DEFAULT_EDGE_SCENARIO = "ecloud_town06_edge"
     SPECTATOR_INDEX = 0
 
     # gRPC
