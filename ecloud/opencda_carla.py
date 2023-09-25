@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#pylint: skip-file # this is a weird override file, so very hard to lint properly...
 """
 Used to reduce the dependency on CARLA api by mocking
 them in the same structure.
